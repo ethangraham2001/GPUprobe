@@ -21,15 +21,13 @@ fn main() {
     let mut open_object = MaybeUninit::uninit();
     let open_skel = skel_builder.open(&mut open_object).expect("failed to open skeleton");
     let skel = open_skel.load().expect("failed to load skeleton");
-    let _ = skel.progs.malloc_enter.attach_uprobe(false, -1, "/lib/x86_64-linux-gnu/libc.so.6", 0x00000000000ad640)
+    let _link_enter = skel.progs.malloc_enter.attach_uprobe(false, -1, "/lib/x86_64-linux-gnu/libc.so.6", 0x00000000000ad640)
         .expect("unable to attach uprobe");
 
-    let _ = skel.progs.malloc_exit.attach_uprobe(true, -1, "/lib/x86_64-linux-gnu/libc.so.6", 0x00000000000ad640)
+    let _link_exit = skel.progs.malloc_exit.attach_uprobe(true, -1, "/lib/x86_64-linux-gnu/libc.so.6", 0x00000000000ad640)
         .expect("unable to attach uprobe");
 
     let key0 = vec![0u8; 4];
-    let value0 = vec![0u8; 8];
-
     loop {
        let mallocs = skel.maps.num_mallocs.lookup(&key0, MapFlags::ANY)
             .map(|v| match v {
