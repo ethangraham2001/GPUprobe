@@ -1,0 +1,22 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-O2",
+      "-g",
+      "--target=bpf",
+      "-Wno-compare-distinct-pointer-types",
+      "-D__TARGET_ARCH_x86",
+      "-Iinclude",
+      "-I.",
+      "-I../../libbpf/src/root/usr/include",
+      "-c",
+      "-o",
+      "gpuprobe.bpf.o",
+      "gpuprobe.bpf.c"
+    ],
+    "directory": "/home/ethan/dev/gpu_probe/src/bpf",
+    "file": "/home/ethan/dev/gpu_probe/src/bpf/gpuprobe.bpf.c",
+    "output": "/home/ethan/dev/gpu_probe/src/bpf/gpuprobe.bpf.o"
+  }
+]

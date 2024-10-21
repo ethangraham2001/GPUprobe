@@ -1,0 +1,12 @@
+[package]
+name = "gpu_probe"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[build-dependencies]
+libbpf-cargo = "0.24"
+
+[dependencies]
+libbpf-rs = "0.24"
+libc = "0.2"
