@@ -114,4 +114,50 @@ int trace_cuda_malloc_ret(struct pt_regs *ctx)
 	return 0;
 }
 
+SEC("uprobe/cudaFree")
+int trace_cuda_free(struct pt_regs *ctx)
+{
+	bpf_printk("called cudaFree");
+	u32 pid;
+	void *dev_ptr;
+
+	dev_ptr = (void**)PT_REGS_PARM1(ctx);
+	pid = (u32)bpf_get_current_pid_tgid();
+
+	if (bpf_map_update_elem(&pid_to_dev_ptr, &pid, &dev_ptr, 0)) {
+		bpf_printk("failed to update dev_ptr cudaFree");
+	}
+
+	return 0;
+}
+
+SEC("uretprobe/cudaFree")
+int trace_cuda_free_ret(struct pt_regs *ctx)
+{
+	int cuda_free_ret;
+	u32 pid;
+	void *dev_ptr;
+	void **map_ptr;
+	size_t zero = 0;
+
+	cuda_free_ret = PT_REGS_RC(ctx);
+	if (cuda_free_ret) {
+		return -1;
+	}
+
+	pid = (u32)bpf_get_current_pid_tgid();
+	map_ptr = bpf_map_lookup_elem(&pid_to_dev_ptr, &pid);
+
+	if (!map_ptr) {
+		return -1;
+	}
+	dev_ptr = *map_ptr;
+	
+	if (bpf_map_update_elem(&successful_allocs, &dev_ptr, &zero, 0)) {
+		return -1;
+	}
+
+	return 0;
+}
+
 char LICENSE[] SEC("license") = "GPL";

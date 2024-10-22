@@ -24,7 +24,7 @@ fn main() {
         .expect("unable to open skeleton");
     let skel = open_skel.load().expect("unable to load skeleton");
 
-    let _uprobe_link = skel
+    let _malloc_uprobe_link = skel
         .progs
         .trace_cuda_malloc
         .attach_uprobe(
@@ -35,7 +35,7 @@ fn main() {
         )
         .expect("unable to attach cuda uprobe");
 
-    let _uretprobe_link = skel
+    let _malloc_uretprobe_link = skel
         .progs
         .trace_cuda_malloc_ret
         .attach_uprobe(
@@ -43,6 +43,28 @@ fn main() {
             -1,
             "/usr/local/cuda/lib64/libcudart.so",
             0x00000000000560c0,
+        )
+        .expect("unable to attach cuda uretprobe");
+
+    let _free_uprobe_link = skel
+        .progs
+        .trace_cuda_free
+        .attach_uprobe(
+            false,
+            -1,
+            "/usr/local/cuda/lib64/libcudart.so",
+            0x00000000000568c0,
+        )
+        .expect("unable to attach cuda uretprobe");
+
+    let _free_uretprobe_link = skel
+        .progs
+        .trace_cuda_free_ret
+        .attach_uprobe(
+            true,
+            -1,
+            "/usr/local/cuda/lib64/libcudart.so",
+            0x00000000000568c0,
         )
         .expect("unable to attach cuda uretprobe");
 
