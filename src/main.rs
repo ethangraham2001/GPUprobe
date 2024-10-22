@@ -1,4 +1,7 @@
-use std::error;
+mod gpuprobe_memleak;
+use gpuprobe_memleak::GpuprobeMemleak;
+
+use std::error::Error;
 use std::mem::MaybeUninit;
 
 use libbpf_rs::skel::OpenSkel;
@@ -14,63 +17,14 @@ mod gpuprobe {
     ));
 }
 
-use gpuprobe::*;
-
-fn main() {
-    let skel_builder = GpuprobeSkelBuilder::default();
-    let mut open_object = MaybeUninit::uninit();
-    let open_skel = skel_builder
-        .open(&mut open_object)
-        .expect("unable to open skeleton");
-    let skel = open_skel.load().expect("unable to load skeleton");
-
-    let _malloc_uprobe_link = skel
-        .progs
-        .trace_cuda_malloc
-        .attach_uprobe(
-            false,
-            -1,
-            "/usr/local/cuda/lib64/libcudart.so",
-            0x00000000000560c0,
-        )
-        .expect("unable to attach cuda uprobe");
-
-    let _malloc_uretprobe_link = skel
-        .progs
-        .trace_cuda_malloc_ret
-        .attach_uprobe(
-            true,
-            -1,
-            "/usr/local/cuda/lib64/libcudart.so",
-            0x00000000000560c0,
-        )
-        .expect("unable to attach cuda uretprobe");
-
-    let _free_uprobe_link = skel
-        .progs
-        .trace_cuda_free
-        .attach_uprobe(
-            false,
-            -1,
-            "/usr/local/cuda/lib64/libcudart.so",
-            0x00000000000568c0,
-        )
-        .expect("unable to attach cuda uretprobe");
-
-    let _free_uretprobe_link = skel
-        .progs
-        .trace_cuda_free_ret
-        .attach_uprobe(
-            true,
-            -1,
-            "/usr/local/cuda/lib64/libcudart.so",
-            0x00000000000568c0,
-        )
-        .expect("unable to attach cuda uretprobe");
+fn main() -> Result<(), gpuprobe_memleak::InitError> {
+    let mut memleak = gpuprobe_memleak::GpuprobeMemleak::new()?;
+    memleak.attach_uprobes()?;
 
     let key0 = vec![0u8; 4];
     loop {
-        let num_cuda_malloc_calls = skel
+        let num_cuda_malloc_calls = memleak
+            .skel
             .maps
             .num_cuda_malloc_calls
             .lookup(&key0, MapFlags::ANY)
@@ -85,12 +39,16 @@ fn main() {
             })
             .expect("unable to perform map lookup");
 
-        println!("total number of `cudaMalloc` calls: {}", num_cuda_malloc_calls);
+        println!(
+            "total number of `cudaMalloc` calls: {}",
+            num_cuda_malloc_calls
+        );
         println!("outstanding allocations");
 
-        skel.maps.successful_allocs.keys().for_each(|addr| {
+        memleak.skel.maps.successful_allocs.keys().for_each(|addr| {
             let addr_key: [u8; 8] = addr.try_into().expect("unexpected key size");
-            let outstanding_allocs = skel
+            let outstanding_allocs = memleak
+                .skel
                 .maps
                 .successful_allocs
                 .lookup(&addr_key, MapFlags::ANY)
