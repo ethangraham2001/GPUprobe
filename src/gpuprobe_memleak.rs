@@ -1,4 +1,4 @@
-use std::error::{self, Error};
+use std::error::Error;
 use std::mem::MaybeUninit;
 
 use libbpf_rs::{
