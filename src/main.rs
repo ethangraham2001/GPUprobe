@@ -1,11 +1,4 @@
 mod gpuprobe_memleak;
-use gpuprobe_memleak::GpuprobeMemleak;
-
-use std::error::Error;
-use std::mem::MaybeUninit;
-
-use libbpf_rs::skel::OpenSkel;
-use libbpf_rs::skel::SkelBuilder;
 
 use libbpf_rs::MapCore as _;
 use libbpf_rs::MapFlags;
@@ -17,7 +10,15 @@ mod gpuprobe {
     ));
 }
 
-fn main() -> Result<(), gpuprobe_memleak::InitError> {
+const WELCOME_MSG: &str = r#"
+GPUprobe memleak utility
+========================
+
+"#;
+
+fn main() -> Result<(), gpuprobe_memleak::GpuprobeMemleakError> {
+    println!("{WELCOME_MSG}");
+
     let mut memleak = gpuprobe_memleak::GpuprobeMemleak::new()?;
     memleak.attach_uprobes()?;
 
@@ -43,29 +44,26 @@ fn main() -> Result<(), gpuprobe_memleak::InitError> {
             "total number of `cudaMalloc` calls: {}",
             num_cuda_malloc_calls
         );
-        println!("outstanding allocations");
 
-        memleak.skel.maps.successful_allocs.keys().for_each(|addr| {
-            let addr_key: [u8; 8] = addr.try_into().expect("unexpected key size");
-            let outstanding_allocs = memleak
-                .skel
-                .maps
-                .successful_allocs
-                .lookup(&addr_key, MapFlags::ANY)
-                .expect("no value found");
-            match outstanding_allocs {
-                Some(count) => {
-                    let count: [u8; 8] = count.try_into().expect("unable to convert result");
-                    println!(
-                        "0x{:8x} -> {} bytes",
-                        u64::from_ne_bytes(addr_key),
-                        u64::from_ne_bytes(count)
-                    );
-                }
-                None => todo!(),
-            }
+        let oustanding_allocs = memleak
+            .get_outstanding_allocs()
+            .expect("unable to get allocations");
+
+        let leaked_bytes = oustanding_allocs
+            .iter()
+            .fold(0u64, |total, (_, size)| total + size);
+
+        println!(
+            "{} bytes leaked from {} cuda memory allocation(s)",
+            leaked_bytes,
+            oustanding_allocs.len()
+        );
+
+        oustanding_allocs.iter().for_each(|(addr, size)| {
+            println!("\t0x{addr:x}: {size} bytes");
         });
 
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        println!("========================\n");
+        std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }
