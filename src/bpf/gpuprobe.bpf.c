@@ -70,9 +70,7 @@ int trace_cuda_malloc(struct pt_regs *ctx)
 	bpf_map_update_elem(&launched_allocs, &dev_ptr, &size, 0);
 
 	pid = (u32)bpf_get_current_pid_tgid();
-	bpf_map_update_elem(&pid_to_dev_ptr, &pid, &dev_ptr, 0);
-
-	return 0;
+	return bpf_map_update_elem(&pid_to_dev_ptr, &pid, &dev_ptr, 0);
 }
 
 SEC("uretprobe/cudaMalloc")
@@ -109,10 +107,7 @@ int trace_cuda_malloc_ret(struct pt_regs *ctx)
 		return -1;
 	}
 
-	bpf_printk("host_ptr = 0x%p, device_ptr = 0x%p", dev_ptr, alloc_ptr);
-	bpf_map_update_elem(&successful_allocs, &alloc_ptr, size, 0);
-
-	return 0;
+	return bpf_map_update_elem(&successful_allocs, &alloc_ptr, size, 0);
 }
 
 SEC("uprobe/cudaFree")
@@ -152,12 +147,38 @@ int trace_cuda_free_ret(struct pt_regs *ctx)
 	if (!map_ptr) {
 		return -1;
 	}
-	dev_ptr = *map_ptr;
 
+	dev_ptr = *map_ptr;
 	if (bpf_map_update_elem(&successful_allocs, &dev_ptr, &zero, 0)) {
 		return -1;
 	}
 
+	return 0;
+}
+
+/**
+ * maps a kernel function address to the number of times it has been called
+ */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void*);
+	__type(value, size_t);
+	__uint(max_entries, 10240);
+} kernel_calls_hist SEC(".maps");
+
+SEC("uprobe/cudaKernelLaunch")
+int trace_cuda_launch_kernel(struct pt_regs *ctx)
+{
+	void *func;
+	u64 one = 1;
+	size_t *num_launches;
+
+	func = (void *)PT_REGS_PARM1(ctx);
+	if (!(num_launches = bpf_map_lookup_elem(&kernel_calls_hist, &func))) {
+		bpf_map_update_elem(&kernel_calls_hist, &func, &one, 0);
+	} else {
+		__sync_fetch_and_add(num_launches, 1);
+	}
 	return 0;
 }
 
