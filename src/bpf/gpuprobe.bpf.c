@@ -45,7 +45,7 @@ struct {
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__type(key, u32);
-	__type(value, void**);
+	__type(value, void **);
 	__uint(max_entries, 10240);
 } pid_to_dev_ptr SEC(".maps");
 
@@ -65,7 +65,7 @@ int trace_cuda_malloc(struct pt_regs *ctx)
 		__sync_fetch_and_add(num_mallocs, 1);
 	}
 
-	dev_ptr = (void**)PT_REGS_PARM1(ctx);
+	dev_ptr = (void **)PT_REGS_PARM1(ctx);
 	size = (size_t)PT_REGS_PARM2(ctx);
 	bpf_map_update_elem(&launched_allocs, &dev_ptr, &size, 0);
 
@@ -87,11 +87,12 @@ int trace_cuda_malloc_ret(struct pt_regs *ctx)
 
 	cuda_malloc_ret = (int)PT_REGS_RC(ctx);
 	if (cuda_malloc_ret) {
-		num_failures = bpf_map_lookup_elem(&cuda_malloc_failures, &key0);
+		num_failures =
+			bpf_map_lookup_elem(&cuda_malloc_failures, &key0);
 		if (num_failures)
 			__sync_fetch_and_add(num_failures, 1);
 	}
-	
+
 	pid = (u32)bpf_get_current_pid_tgid();
 	map_ptr = bpf_map_lookup_elem(&pid_to_dev_ptr, &pid);
 
@@ -121,7 +122,7 @@ int trace_cuda_free(struct pt_regs *ctx)
 	u32 pid;
 	void *dev_ptr;
 
-	dev_ptr = (void**)PT_REGS_PARM1(ctx);
+	dev_ptr = (void **)PT_REGS_PARM1(ctx);
 	pid = (u32)bpf_get_current_pid_tgid();
 
 	if (bpf_map_update_elem(&pid_to_dev_ptr, &pid, &dev_ptr, 0)) {
@@ -152,7 +153,7 @@ int trace_cuda_free_ret(struct pt_regs *ctx)
 		return -1;
 	}
 	dev_ptr = *map_ptr;
-	
+
 	if (bpf_map_update_elem(&successful_allocs, &dev_ptr, &zero, 0)) {
 		return -1;
 	}
