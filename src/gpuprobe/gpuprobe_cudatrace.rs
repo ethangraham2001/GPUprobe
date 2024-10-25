@@ -5,10 +5,6 @@ mod gpuprobe {
     ));
 }
 
-use gpuprobe::*;
-
-use std::error::Error;
-
 use libbpf_rs::{MapCore, MapFlags};
 
 use super::gpuprobe::GpuprobeLinks;
@@ -18,6 +14,8 @@ const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
 
 /// contains implementations for the cudatrace program
 impl Gpuprobe {
+    /// attaches uprobes for the cudatrace program, or returns an error on
+    /// failure
     pub fn attach_cudatrace_uprobes(&mut self) -> Result<(), GpuprobeError> {
         let cuda_launch_kernel_uprobe_link = self
             .skel
@@ -36,6 +34,12 @@ impl Gpuprobe {
         Ok(())
     }
 
+    /// returns the histogram of frequencies of CUDA kernels
+    /// TODO: symbol resolution - right now if we launch the same program 
+    /// twice, we cannot recognize that the same kernel was launched due to
+    /// ASLR and other factors. We would ideally like to resolve which kernel
+    /// is being launched by looking at the relative addresses inside of the
+    /// cuda binary.
     pub fn get_kernel_launch_frequencies(&self) -> Result<Vec<(u64, u64)>, GpuprobeError> {
         Ok(self
             .skel

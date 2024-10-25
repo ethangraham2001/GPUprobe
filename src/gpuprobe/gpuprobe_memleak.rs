@@ -9,7 +9,8 @@ const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
 
 /// contains implementation for the memleak program
 impl Gpuprobe {
-    /// attaches probes or returns an initialization error on failure
+    /// attaches uprobes for the memleak program, or returns an error on
+    /// failure
     pub fn attach_memleak_uprobes(&mut self) -> Result<(), GpuprobeError> {
         let cuda_malloc_uprobe_link = self
             .skel
