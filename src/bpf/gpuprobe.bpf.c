@@ -45,7 +45,7 @@ struct {
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__type(key, u32);
-	__type(value, void**);
+	__type(value, void **);
 	__uint(max_entries, 10240);
 } pid_to_dev_ptr SEC(".maps");
 
@@ -65,14 +65,12 @@ int trace_cuda_malloc(struct pt_regs *ctx)
 		__sync_fetch_and_add(num_mallocs, 1);
 	}
 
-	dev_ptr = (void**)PT_REGS_PARM1(ctx);
+	dev_ptr = (void **)PT_REGS_PARM1(ctx);
 	size = (size_t)PT_REGS_PARM2(ctx);
 	bpf_map_update_elem(&launched_allocs, &dev_ptr, &size, 0);
 
 	pid = (u32)bpf_get_current_pid_tgid();
-	bpf_map_update_elem(&pid_to_dev_ptr, &pid, &dev_ptr, 0);
-
-	return 0;
+	return bpf_map_update_elem(&pid_to_dev_ptr, &pid, &dev_ptr, 0);
 }
 
 SEC("uretprobe/cudaMalloc")
@@ -87,11 +85,12 @@ int trace_cuda_malloc_ret(struct pt_regs *ctx)
 
 	cuda_malloc_ret = (int)PT_REGS_RC(ctx);
 	if (cuda_malloc_ret) {
-		num_failures = bpf_map_lookup_elem(&cuda_malloc_failures, &key0);
+		num_failures =
+			bpf_map_lookup_elem(&cuda_malloc_failures, &key0);
 		if (num_failures)
 			__sync_fetch_and_add(num_failures, 1);
 	}
-	
+
 	pid = (u32)bpf_get_current_pid_tgid();
 	map_ptr = bpf_map_lookup_elem(&pid_to_dev_ptr, &pid);
 
@@ -108,10 +107,7 @@ int trace_cuda_malloc_ret(struct pt_regs *ctx)
 		return -1;
 	}
 
-	bpf_printk("host_ptr = 0x%p, device_ptr = 0x%p", dev_ptr, alloc_ptr);
-	bpf_map_update_elem(&successful_allocs, &alloc_ptr, size, 0);
-
-	return 0;
+	return bpf_map_update_elem(&successful_allocs, &alloc_ptr, size, 0);
 }
 
 SEC("uprobe/cudaFree")
@@ -121,7 +117,7 @@ int trace_cuda_free(struct pt_regs *ctx)
 	u32 pid;
 	void *dev_ptr;
 
-	dev_ptr = (void**)PT_REGS_PARM1(ctx);
+	dev_ptr = (void **)PT_REGS_PARM1(ctx);
 	pid = (u32)bpf_get_current_pid_tgid();
 
 	if (bpf_map_update_elem(&pid_to_dev_ptr, &pid, &dev_ptr, 0)) {
@@ -151,12 +147,38 @@ int trace_cuda_free_ret(struct pt_regs *ctx)
 	if (!map_ptr) {
 		return -1;
 	}
+
 	dev_ptr = *map_ptr;
-	
 	if (bpf_map_update_elem(&successful_allocs, &dev_ptr, &zero, 0)) {
 		return -1;
 	}
 
+	return 0;
+}
+
+/**
+ * maps a kernel function address to the number of times it has been called
+ */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void*);
+	__type(value, size_t);
+	__uint(max_entries, 10240);
+} kernel_calls_hist SEC(".maps");
+
+SEC("uprobe/cudaKernelLaunch")
+int trace_cuda_launch_kernel(struct pt_regs *ctx)
+{
+	void *func;
+	u64 one = 1;
+	size_t *num_launches;
+
+	func = (void *)PT_REGS_PARM1(ctx);
+	if (!(num_launches = bpf_map_lookup_elem(&kernel_calls_hist, &func))) {
+		bpf_map_update_elem(&kernel_calls_hist, &func, &one, 0);
+	} else {
+		__sync_fetch_and_add(num_launches, 1);
+	}
 	return 0;
 }
 
