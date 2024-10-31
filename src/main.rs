@@ -6,22 +6,20 @@ use libbpf_rs::MapFlags;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None, arg_required_else_help = true)]
 struct Args {
-    /// Enable memory leak detection mode
+    /// Detects leaking calls to cudaMalloc from the CUDA runtime API.
     #[arg(long, exclusive = true)]
     memleak: bool,
 
-    /// Enable CUDA trace mode
+    /// Maintains a histogram on frequencies of cuda kernel launches.
     #[arg(long, exclusive = true)]
     cudatrace: bool,
-}
 
-const USAGE: &str = r#"
-GPUprobe usage:
-    ./gpuprobe --memleak # runs the memleak utility
-    ./gpuprobe --cudatrace # runs the cudatrace utility
-"#;
+    /// Approximates bandwidth utilization of cudaMemcpy.
+    #[arg(long, exclusive = true)]
+    bandwidth_util: bool,
+}
 
 const WELCOME_MEMLEAK_MSG: &str = r#"
 GPUprobe memleak utility
@@ -35,19 +33,24 @@ GPUprobe cudatrace utility
 
 "#;
 
-fn usage() {
-    print!("{USAGE}");
-    std::process::exit(1);
-}
+const WELCOME_BANDWIDTH_UTIL_MSG: &str = r#"
+GPUprobe bandwidth_util utility
+========================
+
+"#;
 
 fn main() -> Result<(), gpuprobe::GpuprobeError> {
     let args = Args::parse();
 
-    match (args.memleak, args.cudatrace) {
-        (true, false) => memleak_prog(),
-        (false, true) => cudatrace_prog(),
-        (_, _) => Ok(usage()),
+    if args.memleak {
+        return memleak_prog();
+    } else if args.cudatrace {
+        return cudatrace_prog();
+    } else if args.bandwidth_util {
+        return bandwidth_util_prog();
     }
+
+    Ok(())
 }
 
 fn memleak_prog() -> Result<(), gpuprobe::GpuprobeError> {
@@ -110,15 +113,38 @@ fn cudatrace_prog() -> Result<(), gpuprobe::GpuprobeError> {
 
     loop {
         let kernel_launches = cudatrace.get_kernel_launch_frequencies()?;
-        let num_launches = kernel_launches.iter()
+        let num_launches = kernel_launches
+            .iter()
             .fold(0u64, |total, (_, count)| total + count);
 
-        println!("{} `cudaLaunchKernel` calls for {} kernels", num_launches, kernel_launches.len());
-        kernel_launches.iter().for_each({|(addr, count)|
-            println!("\t0x{addr:x}: {count} launches")
-        });
+        println!(
+            "{} `cudaLaunchKernel` calls for {} kernels",
+            num_launches,
+            kernel_launches.len()
+        );
+        kernel_launches
+            .iter()
+            .for_each(|(addr, count)| println!("\t0x{addr:x}: {count} launches"));
 
         println!("========================\n");
         std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+}
+
+fn bandwidth_util_prog() -> Result<(), gpuprobe::GpuprobeError> {
+    println!("{WELCOME_BANDWIDTH_UTIL_MSG}");
+
+    let mut gpuprobe = gpuprobe::Gpuprobe::new()?;
+    gpuprobe.attach_bandwidth_util_uprobes()?;
+
+    loop {
+        let calls = gpuprobe.consume_queue()?;
+
+        for call in calls {
+            println!("{}", call);
+        }
+
+        println!("========================\n");
+        std::thread::sleep(std::time::Duration::from_secs(1));
     }
 }

@@ -4,7 +4,7 @@ ARCH := x86
 
 CFLAGS := -O2 -g --target=bpf -Wno-compare-distinct-pointer-types
 CFLAGS += -D__TARGET_ARCH_$(ARCH)
-INCLUDES := -Iinclude -I. -I../../libbpf/src/root/usr/include
+INCLUDES := -Iinclude -I. -I../../../libbpf/src/root/usr/include
 
 all: gpuprobe.bpf.o gpuprobe.skel.h
 
