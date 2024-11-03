@@ -1,11 +1,20 @@
 # GPUprobe
 
 Provides some eBPF utilities for tracking GPU actvity from user-space via
-uprobes.
+uprobes. 
 
-For now, only a memory leak utility is available *(similar to bcc-memleak)*.
-It works by correlating calls to `cudaMalloc()` and `cudaFree()` to detect when
-a memory leak has occured 
+Three utilies are currently available:
+
+```
+Usage: gpu_probe [OPTIONS]
+
+Options:
+      --memleak         Detects leaking calls to cudaMalloc from the CUDA runtime API
+      --cudatrace       Maintains a histogram on frequencies of cuda kernel launches
+      --bandwidth-util  Approximates bandwidth utilization of cudaMemcpy
+  -h, --help            Print help
+  -V, --version         Print version
+```
 
 ## Memleak utility
 
