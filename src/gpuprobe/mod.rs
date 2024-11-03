@@ -1,3 +1,4 @@
+pub mod gpuprobe_bandwidth_util;
 pub mod gpuprobe_cudatrace;
 pub mod gpuprobe_memleak;
 
@@ -16,12 +17,24 @@ mod gpuprobe {
 }
 use gpuprobe::*;
 
+const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
+
 // TODO maybe consider using orobouros self-referential
 pub struct Gpuprobe {
     open_obj: Box<MaybeUninit<OpenObject>>,
     pub skel: GpuprobeSkel<'static>, // trust me bro
     links: GpuprobeLinks,
 }
+
+const DEFAULT_LINKS: GpuprobeLinks = GpuprobeLinks {
+    trace_cuda_malloc: None,
+    trace_cuda_malloc_ret: None,
+    trace_cuda_free: None,
+    trace_cuda_free_ret: None,
+    trace_cuda_launch_kernel: None,
+    trace_cuda_memcpy: None,
+    trace_cuda_memcpy_ret: None,
+};
 
 impl Gpuprobe {
     /// returns a new Gpuprobe or an initialization error on failure
@@ -38,13 +51,7 @@ impl Gpuprobe {
         Ok(Self {
             open_obj,
             skel,
-            links: GpuprobeLinks {
-                trace_cuda_malloc: None,
-                trace_cuda_malloc_ret: None,
-                trace_cuda_free: None,
-                trace_cuda_free_ret: None,
-                trace_cuda_launch_kernel: None,
-            },
+            links: DEFAULT_LINKS,
         })
     }
 }
