@@ -72,5 +72,30 @@ GPUprobe cudatrace utility
         0x626693de7b80: 1000 launches
         0x626693de7c60: 1000 launches
 ========================
+```
 
+## Bandwidth utilization utility
+
+In this sample output, we infer the average bandwidth utilization of calls to
+`cudaMemcpy`, a well as the direction of the transfers and their durations.
+
+```
+GPUprobe bandwidth_util utility
+========================
+
+
+Traced 1 cudaMemcpy calls
+        H2D 3045740550.87548 bytes/sec for 0.00263 secs
+========================
+
+Traced 2 cudaMemcpy calls
+        H2D 2981869117.56429 bytes/sec for 0.00268 secs
+        D2H 3039108386.38160 bytes/sec for 0.00263 secs
+========================
+```
+
+This is computed naively with
+
+```
+throughput = count / (end - start)
 ```
