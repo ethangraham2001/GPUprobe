@@ -140,11 +140,23 @@ fn bandwidth_util_prog() -> Result<(), gpuprobe::GpuprobeError> {
     loop {
         let calls = gpuprobe.consume_queue()?;
 
-        for call in calls {
-            println!("{}", call);
+        if calls.len() == 0 {
+            continue;
         }
 
+        println!("Traced {} cudaMemcpy calls", calls.len());
+        calls.iter().for_each(|c| {
+            let bandwidth_util = c.compute_bandwidth_util().unwrap_or(0.0);
+            let delta = (c.end_time - c.start_time) as f64 / 1e9;
+            println!(
+                "\t{} {:.5} bytes/sec for {:.5} secs",
+                c.kind_to_str(),
+                bandwidth_util,
+                delta
+            )
+        });
+
         println!("========================\n");
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }

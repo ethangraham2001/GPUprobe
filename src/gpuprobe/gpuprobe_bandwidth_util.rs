@@ -87,6 +87,30 @@ impl CudaMemcpy {
         // 2. The byte array is at least as large as the struct
         unsafe { Some(std::ptr::read_unaligned(bytes.as_ptr() as *const Self)) }
     }
+
+    /// Returns a human readable version of the `kind` parameter passed to
+    /// `cudaMemcpy`
+    pub fn kind_to_str(&self) -> String {
+        match self.memcpy_kind {
+            0 => "H2H".to_string(),
+            1 => "H2D".to_string(),
+            2 => "D2H".to_string(),
+            3 => "D2D".to_string(),
+            4 => "DEF".to_string(),
+            _ => "INVALID KIND".to_string(),
+        }
+    }
+
+    pub fn compute_bandwidth_util(&self) -> Option<f64> {
+        if self.start_time >= self.end_time {
+            return None;
+        }
+
+        let delta = (self.end_time - self.start_time) as f64;
+        let nanos_per_second = 1e9;
+        let res = (self.count as f64) / delta * nanos_per_second;
+        Some(res)
+    }
 }
 
 impl std::fmt::Display for CudaMemcpy {
