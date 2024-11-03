@@ -2,7 +2,7 @@ use std::error::Error;
 
 use libbpf_rs::{MapCore, MapFlags};
 
-use super::{Gpuprobe, GpuprobeError, DEFAULT_LINKS};
+use super::{Gpuprobe, GpuprobeError};
 
 const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
 
@@ -39,14 +39,10 @@ impl Gpuprobe {
             .attach_uprobe(true, -1, LIBCUDART_PATH, 0x00000000000568c0)
             .map_err(|_| GpuprobeError::AttachError)?;
 
-        let mut links = DEFAULT_LINKS;
-        links.trace_cuda_malloc = Some(cuda_malloc_uprobe_link);
-        links.trace_cuda_malloc_ret = Some(cuda_malloc_uretprobe_link);
-        links.trace_cuda_free = Some(cuda_free_uprobe_link);
-        links.trace_cuda_free_ret = Some(cuda_free_uretprobe_link);
-        links.trace_cuda_launch_kernel = None;
-        self.links = links;
-
+        self.links.trace_cuda_malloc = Some(cuda_malloc_uprobe_link);
+        self.links.trace_cuda_malloc_ret = Some(cuda_malloc_uretprobe_link);
+        self.links.trace_cuda_free = Some(cuda_free_uprobe_link);
+        self.links.trace_cuda_free_ret = Some(cuda_free_uretprobe_link);
         Ok(())
     }
 

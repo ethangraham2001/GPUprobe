@@ -19,11 +19,21 @@ use gpuprobe::*;
 
 const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
 
-// TODO maybe consider using orobouros self-referential
+/// Gpuuprobe wraps the eBPF program state, provides an interface for 
+/// attaching relevant uprobes, and exporting their metrics.
+///
+/// !!TODO!! maybe consider using orobouros self-referential instead of the 
+/// static lifetime
 pub struct Gpuprobe {
     open_obj: Box<MaybeUninit<OpenObject>>,
     pub skel: GpuprobeSkel<'static>, // trust me bro
     links: GpuprobeLinks,
+}
+
+pub struct AttachOpts {
+    pub memleak: bool,
+    pub cudatrace: bool,
+    pub bandwidth_util: bool,
 }
 
 const DEFAULT_LINKS: GpuprobeLinks = GpuprobeLinks {
@@ -37,7 +47,7 @@ const DEFAULT_LINKS: GpuprobeLinks = GpuprobeLinks {
 };
 
 impl Gpuprobe {
-    /// returns a new Gpuprobe or an initialization error on failure
+    /// returns a new Gpuprobe, or an initialization error on failure
     pub fn new() -> Result<Self, GpuprobeError> {
         let skel_builder = GpuprobeSkelBuilder::default();
         let mut open_obj = Box::new(MaybeUninit::uninit());
@@ -53,6 +63,33 @@ impl Gpuprobe {
             skel,
             links: DEFAULT_LINKS,
         })
+    }
+
+    /// Attaches relevant uprobes as defined in `opts`. 
+    /// # Example:
+    /// ```rust
+    /// let opts = AttachOpts {
+    ///     memleak: true,
+    ///     cudatrace: false,
+    ///     bandwidth_util: true,
+    /// }
+    ///
+    /// // attaches memleak and bandwidth util uprobes and uretprobes
+    /// gpuprobe.attach_uprobes_from_opts(&opts).unwrap();
+    ///
+    /// ```
+    pub fn attach_uprobes_from_opts(&mut self, opts: &AttachOpts) -> Result<(), GpuprobeError> {
+        if opts.memleak {
+            self.attach_memleak_uprobes()?;
+        }
+        if opts.cudatrace {
+            self.attach_cudatrace_uprobes()?;
+        }
+        if opts.bandwidth_util {
+            self.attach_bandwidth_util_uprobes()?;
+        }
+
+        Ok(())
     }
 }
 

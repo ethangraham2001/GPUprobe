@@ -21,10 +21,7 @@ impl Gpuprobe {
             .attach_uprobe(false, -1, LIBCUDART_PATH, 0x0000000000074440)
             .map_err(|_| GpuprobeError::AttachError)?;
 
-        let mut links = DEFAULT_LINKS;
-        links.trace_cuda_launch_kernel = Some(cuda_launch_kernel_uprobe_link);
-        self.links = links;
-
+        self.links.trace_cuda_launch_kernel = Some(cuda_launch_kernel_uprobe_link);
         Ok(())
     }
 
