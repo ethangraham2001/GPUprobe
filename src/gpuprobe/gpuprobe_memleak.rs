@@ -2,9 +2,8 @@ use std::error::Error;
 
 use libbpf_rs::{MapCore, MapFlags};
 
-use super::{Gpuprobe, GpuprobeError};
-
-const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
+use super::uprobe_data::MemleakData;
+use super::{Gpuprobe, GpuprobeError, LIBCUDART_PATH};
 
 /// contains implementation for the memleak program
 impl Gpuprobe {
@@ -72,17 +71,19 @@ impl Gpuprobe {
 
     /// returns a map of outsanding cuda memory allocations - i.e. ones that
     /// have not yet been freed
-    pub fn get_outstanding_allocs(&mut self) -> Result<Vec<(u64, u64)>, Box<dyn Error>> {
-        Ok(self
+    pub fn collect_data_memleak(&mut self) -> Result<MemleakData, GpuprobeError> {
+        let outstanding_allocs: Vec<(u64, u64)> = self
             .skel
             .maps
             .successful_allocs
             .keys()
             .map(|addr| {
                 self.addr_to_allocation(addr)
-                    .expect("unable to convert alloc")
+                    .expect("failed to get allocation")
             })
             .filter(|(_, size)| size > &0)
-            .collect())
+            .collect();
+
+        Ok(MemleakData { outstanding_allocs })
     }
 }

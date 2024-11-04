@@ -7,6 +7,7 @@ mod gpuprobe {
 
 use libbpf_rs::MapCore;
 
+use super::uprobe_data::BandwidthUtilData;
 use super::{Gpuprobe, GpuprobeError, LIBCUDART_PATH};
 
 impl Gpuprobe {
@@ -34,7 +35,7 @@ impl Gpuprobe {
 
     /// Copies all cudaMemcpy calls out of the queue and returns them as a Vec,
     /// or returns a GpuProbeError on failure
-    pub fn consume_queue(&self) -> Result<Vec<CudaMemcpy>, GpuprobeError> {
+    pub fn collect_data_bandwidth_util(&self) -> Result<BandwidthUtilData, GpuprobeError> {
         let mut output: Vec<CudaMemcpy> = Vec::new();
         let key: [u8; 0] = []; // key size must be zero for BPF_MAP_TYPE_QUEUE
                                // `lookup_and_delete` calls.
@@ -55,12 +56,16 @@ impl Gpuprobe {
                     }
                 },
                 None => {
-                    return Ok(output);
+                    return Ok(BandwidthUtilData {
+                        cuda_memcpys: output,
+                    });
                 }
             }
         }
 
-        Ok(output)
+        Ok(BandwidthUtilData {
+            cuda_memcpys: output,
+        })
     }
 }
 

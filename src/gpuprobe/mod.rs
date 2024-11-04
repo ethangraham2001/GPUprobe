@@ -1,8 +1,10 @@
 pub mod gpuprobe_bandwidth_util;
 pub mod gpuprobe_cudatrace;
 pub mod gpuprobe_memleak;
+pub mod uprobe_data;
 
 use std::mem::MaybeUninit;
+use uprobe_data::UprobeData;
 
 use libbpf_rs::{
     skel::{OpenSkel, SkelBuilder},
@@ -19,18 +21,21 @@ use gpuprobe::*;
 
 const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
 
-/// Gpuuprobe wraps the eBPF program state, provides an interface for 
+/// Gpuuprobe wraps the eBPF program state, provides an interface for
 /// attaching relevant uprobes, and exporting their metrics.
 ///
-/// !!TODO!! maybe consider using orobouros self-referential instead of the 
+/// !!TODO!! maybe consider using orobouros self-referential instead of the
 /// static lifetime
 pub struct Gpuprobe {
     open_obj: Box<MaybeUninit<OpenObject>>,
     pub skel: GpuprobeSkel<'static>, // trust me bro
     links: GpuprobeLinks,
+    opts: Opts,
+    /// data that should be exported next time queried by prometheus
+    data_to_export: Vec<Box<dyn UprobeData>>,
 }
 
-pub struct AttachOpts {
+pub struct Opts {
     pub memleak: bool,
     pub cudatrace: bool,
     pub bandwidth_util: bool,
@@ -48,7 +53,7 @@ const DEFAULT_LINKS: GpuprobeLinks = GpuprobeLinks {
 
 impl Gpuprobe {
     /// returns a new Gpuprobe, or an initialization error on failure
-    pub fn new() -> Result<Self, GpuprobeError> {
+    pub fn new(opts: Opts) -> Result<Self, GpuprobeError> {
         let skel_builder = GpuprobeSkelBuilder::default();
         let mut open_obj = Box::new(MaybeUninit::uninit());
         let open_obj_ptr = Box::as_mut(&mut open_obj) as *mut MaybeUninit<OpenObject>;
@@ -62,13 +67,40 @@ impl Gpuprobe {
             open_obj,
             skel,
             links: DEFAULT_LINKS,
+            opts,
+            data_to_export: vec![],
         })
     }
 
-    /// Attaches relevant uprobes as defined in `opts`. 
+    pub fn collect_data_uprobes(&mut self) -> Result<(), GpuprobeError> {
+        let mut data: Vec<Box<dyn UprobeData>> = vec![];
+
+        if self.opts.memleak {
+            let memleak_data = self.collect_data_memleak()?;
+            data.push(Box::new(memleak_data));
+        }
+        if self.opts.cudatrace {
+            let cudatrace_data = self.collect_data_cudatrace()?;
+            data.push(Box::new(cudatrace_data));
+        }
+        if self.opts.bandwidth_util {
+            let bandwidth_util_data = self.collect_data_bandwidth_util()?;
+            data.push(Box::new(bandwidth_util_data));
+        }
+
+        // display data to stdout
+        for d in data.into_iter() {
+            println!("{d}");
+            self.data_to_export.push(d); // move occurs here
+        }
+
+        Ok(())
+    }
+
+    /// Attaches relevant uprobes as defined in `opts`.
     /// # Example:
     /// ```rust
-    /// let opts = AttachOpts {
+    /// let opts = Opts {
     ///     memleak: true,
     ///     cudatrace: false,
     ///     bandwidth_util: true,
@@ -78,14 +110,14 @@ impl Gpuprobe {
     /// gpuprobe.attach_uprobes_from_opts(&opts).unwrap();
     ///
     /// ```
-    pub fn attach_uprobes_from_opts(&mut self, opts: &AttachOpts) -> Result<(), GpuprobeError> {
-        if opts.memleak {
+    pub fn attach_uprobes(&mut self) -> Result<(), GpuprobeError> {
+        if self.opts.memleak {
             self.attach_memleak_uprobes()?;
         }
-        if opts.cudatrace {
+        if self.opts.cudatrace {
             self.attach_cudatrace_uprobes()?;
         }
-        if opts.bandwidth_util {
+        if self.opts.bandwidth_util {
             self.attach_bandwidth_util_uprobes()?;
         }
 
