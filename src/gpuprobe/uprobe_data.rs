@@ -64,9 +64,10 @@ impl std::fmt::Display for CudaTraceData {
             num_launches,
             kernel_launches.len()
         )?;
-        kernel_launches.iter().for_each(|(addr, count)| {
-            writeln!(f, "\t0x{addr:x}: {count} launches");
-        });
+
+        for (addr, count) in kernel_launches.iter() {
+            writeln!(f, "\t0x{addr:x}: {count} launches")?;
+        }
         Ok(())
     }
 }
@@ -79,7 +80,7 @@ impl std::fmt::Display for BandwidthUtilData {
         }
 
         writeln!(f, "Traced {} cudaMemcpy calls", calls.len())?;
-        calls.iter().for_each(|c| {
+        for c in calls.iter() {
             let bandwidth_util = c.compute_bandwidth_util().unwrap_or(0.0);
             let delta = (c.end_time - c.start_time) as f64 / 1e9;
             writeln!(
@@ -88,8 +89,8 @@ impl std::fmt::Display for BandwidthUtilData {
                 c.kind_to_str(),
                 bandwidth_util,
                 delta
-            );
-        });
+            )?;
+        }
         Ok(())
     }
 }
