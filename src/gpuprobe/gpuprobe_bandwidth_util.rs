@@ -75,8 +75,8 @@ impl Gpuprobe {
 pub struct CudaMemcpy {
     pub start_time: u64,
     pub end_time: u64,
-    pub dst: *mut std::ffi::c_void,
-    pub src: *mut std::ffi::c_void,
+    pub dst: u64,
+    pub src: u64,
     pub count: u64,
     pub memcpy_kind: u32,
 }
@@ -124,8 +124,8 @@ impl std::fmt::Display for CudaMemcpy {
         writeln!(f, "{{")?;
         writeln!(f, "\tstart_time: {}", self.start_time)?;
         writeln!(f, "\tend_time: {}", self.end_time)?;
-        writeln!(f, "\tdst: {:p}", self.dst)?;
-        writeln!(f, "\tsrc: {:p}", self.dst)?;
+        writeln!(f, "\tdst: {:x}", self.dst)?;
+        writeln!(f, "\tsrc: {:x}", self.dst)?;
         writeln!(f, "\tcount: {}", self.count)?;
         writeln!(f, "\tkind: {}", self.memcpy_kind)?;
         writeln!(f, "}}")

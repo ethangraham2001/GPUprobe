@@ -1,7 +1,7 @@
 use super::gpuprobe_bandwidth_util::CudaMemcpy;
 
 /// Defines the data collected by a uprobe / uretprobe
-pub trait UprobeData: std::fmt::Display /* add prometheus */ {}
+pub trait UprobeData: std::fmt::Display + std::any::Any {}
 
 /// defines the data that is collected in a cycle of the memleak program
 pub struct MemleakData {
