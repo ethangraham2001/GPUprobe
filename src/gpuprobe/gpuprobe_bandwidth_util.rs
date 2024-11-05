@@ -16,6 +16,7 @@ impl Gpuprobe {
     pub fn attach_bandwidth_util_uprobes(&mut self) -> Result<(), GpuprobeError> {
         let cuda_memcpy_uprobe_link = self
             .skel
+            .skel
             .progs
             .trace_cuda_memcpy
             .attach_uprobe(false, -1, LIBCUDART_PATH, 0x000000000006f150)
@@ -23,13 +24,14 @@ impl Gpuprobe {
 
         let cuda_memcpy_uretprobe_link = self
             .skel
+            .skel
             .progs
             .trace_cuda_memcpy_ret
             .attach_uprobe(true, -1, LIBCUDART_PATH, 0x000000000006f150)
             .map_err(|_| GpuprobeError::AttachError)?;
 
-        self.links.trace_cuda_memcpy = Some(cuda_memcpy_uprobe_link);
-        self.links.trace_cuda_memcpy_ret = Some(cuda_memcpy_uretprobe_link);
+        self.links.links.trace_cuda_memcpy = Some(cuda_memcpy_uprobe_link);
+        self.links.links.trace_cuda_memcpy_ret = Some(cuda_memcpy_uretprobe_link);
         Ok(())
     }
 
@@ -41,6 +43,7 @@ impl Gpuprobe {
                                // `lookup_and_delete` calls.
 
         while let Ok(opt) = self
+            .skel
             .skel
             .maps
             .successful_cuda_memcpy_q

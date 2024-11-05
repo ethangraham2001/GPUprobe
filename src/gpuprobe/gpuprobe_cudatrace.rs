@@ -8,7 +8,7 @@ mod gpuprobe {
 use libbpf_rs::{MapCore, MapFlags};
 
 use super::uprobe_data::CudaTraceData;
-use super::{Gpuprobe, GpuprobeError, DEFAULT_LINKS, LIBCUDART_PATH};
+use super::{Gpuprobe, GpuprobeError, LIBCUDART_PATH};
 
 /// contains implementations for the cudatrace program
 impl Gpuprobe {
@@ -17,12 +17,13 @@ impl Gpuprobe {
     pub fn attach_cudatrace_uprobes(&mut self) -> Result<(), GpuprobeError> {
         let cuda_launch_kernel_uprobe_link = self
             .skel
+            .skel
             .progs
             .trace_cuda_launch_kernel
             .attach_uprobe(false, -1, LIBCUDART_PATH, 0x0000000000074440)
             .map_err(|_| GpuprobeError::AttachError)?;
 
-        self.links.trace_cuda_launch_kernel = Some(cuda_launch_kernel_uprobe_link);
+        self.links.links.trace_cuda_launch_kernel = Some(cuda_launch_kernel_uprobe_link);
         Ok(())
     }
 
@@ -35,12 +36,14 @@ impl Gpuprobe {
     pub fn collect_data_cudatrace(&self) -> Result<CudaTraceData, GpuprobeError> {
         let hist: Vec<(u64, u64)> = self
             .skel
+            .skel
             .maps
             .kernel_calls_hist
             .keys()
             .map(|addr| {
                 let key: [u8; 8] = addr.try_into().expect("unable to convert addr");
                 let call_count = self
+                    .skel
                     .skel
                     .maps
                     .kernel_calls_hist

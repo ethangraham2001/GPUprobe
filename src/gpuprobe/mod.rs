@@ -6,7 +6,7 @@ pub mod metrics;
 pub mod uprobe_data;
 
 use metrics::GpuprobeMetrics;
-use std::mem::MaybeUninit;
+use std::{mem::MaybeUninit, sync::Mutex};
 
 use libbpf_rs::{
     skel::{OpenSkel, SkelBuilder},
@@ -25,15 +25,40 @@ use self::metrics::AddrLabel;
 
 const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
 
+pub struct SafeGpuprobeLinks {
+    links: GpuprobeLinks,
+}
+
+pub struct SafeGpuprobeSkel {
+    // E.G: For now we settle for this questionable behavior - we are
+    // interacting with eBPF skeleton, managing the lifetime of a
+    // kernel-attached eBPF program. At this stage I am not sure we can do
+    // better than a static lifetime on this parameter.
+    skel: GpuprobeSkel<'static>,
+}
+
+pub struct SafeGpuProbeObj {
+    open_obj: Box<MaybeUninit<OpenObject>>,
+}
+
+unsafe impl Send for SafeGpuprobeSkel {}
+unsafe impl Sync for SafeGpuprobeSkel {}
+
+unsafe impl Send for SafeGpuprobeLinks {}
+unsafe impl Sync for SafeGpuprobeLinks {}
+
+unsafe impl Send for SafeGpuProbeObj {}
+unsafe impl Sync for SafeGpuProbeObj {}
+
 /// Gpuuprobe wraps the eBPF program state, provides an interface for
 /// attaching relevant uprobes, and exporting their metrics.
 ///
 /// !!TODO!! maybe consider using orobouros self-referential instead of the
 /// static lifetime
 pub struct Gpuprobe {
-    open_obj: Box<MaybeUninit<OpenObject>>,
-    skel: GpuprobeSkel<'static>, // trust me bro
-    links: GpuprobeLinks,
+    obj: SafeGpuProbeObj,
+    skel: SafeGpuprobeSkel, // references a static lifetime! See struct def
+    links: SafeGpuprobeLinks,
     opts: Opts,
     pub metrics: GpuprobeMetrics,
 }
@@ -68,9 +93,11 @@ impl Gpuprobe {
         let skel = open_skel.load().map_err(|_| GpuprobeError::LoadError)?;
         let metrics = GpuprobeMetrics::new()?;
         Ok(Self {
-            open_obj,
-            skel,
-            links: DEFAULT_LINKS,
+            obj: SafeGpuProbeObj { open_obj },
+            skel: SafeGpuprobeSkel { skel },
+            links: SafeGpuprobeLinks {
+                links: DEFAULT_LINKS,
+            },
             opts,
             metrics,
         })

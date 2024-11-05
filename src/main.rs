@@ -1,16 +1,14 @@
 mod gpuprobe;
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{sync::Arc, time::Duration};
+
+use tokio::{select, sync::Mutex};
 
 use clap::Parser;
 use gpuprobe::Gpuprobe;
 use prometheus_client::{encoding::text::encode, registry::Registry};
 
-use axum::{
-    extract::State, http::StatusCode, response::IntoResponse, routing::get, Router
-};
-
-use crate::gpuprobe::metrics::GpuprobeMetrics;
+use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Router};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None, arg_required_else_help = true)]
@@ -26,13 +24,17 @@ struct Args {
     /// Approximates bandwidth utilization of cudaMemcpy.
     #[arg(long, exclusive = false)]
     bandwidth_util: bool,
+
+    /// If set to true, will display verbose output
+    #[arg(long, exclusive = false)]
+    verbose: bool,
 }
 
-const INTERVAL_DURATION_SECONDS: u64 = 5;
-
-
-// Explicitly define the state type
-type SharedRegistry = Arc<Registry>;
+#[derive(Clone)]
+struct AppState {
+    gpuprobe: Arc<Mutex<Gpuprobe>>,
+    registry: Arc<Registry>,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,35 +52,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut registry = Registry::default();
     gpuprobe.metrics.register(&mut registry);
 
+    let registry: Arc<Registry> = Arc::new(registry);
+    let gpuprobe = Mutex::new(gpuprobe);
+    let gpuprobe = Arc::new(gpuprobe);
 
-    for _ in 0..=10 {
-        gpuprobe.collect_metrics_uprobes().unwrap();
-        let mut buff = String::new();
-        encode(&mut buff, &registry).expect("encoding failure");
-        println!("{buff}");
-
-        println!("========================\n");
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
-
-    let arc_registry: Arc<Registry> = Arc::new(registry);
+    let gpuprobe_clone = Arc::clone(&gpuprobe);
+    let registry_clone = Arc::clone(&registry);
 
     // Create router with metrics endpoint
     let app = Router::new()
         .route("/metrics", get(metrics_handler))
-        .with_state(arc_registry);
+        .with_state(AppState { gpuprobe, registry });
+
+    // task that displays to stdout periodically
+    let stdout_handle = tokio::spawn(async move {
+        loop {
+            // Access gpuprobe through the mutex
+            let mut probe = gpuprobe_clone.lock().await;
+            probe.collect_metrics_uprobes().unwrap();
+
+            let mut buff = String::new();
+            encode(&mut buff, &registry_clone).unwrap();
+            println!("{buff}");
+
+            // Optional: Add delay between iterations
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    });
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:9091").await.unwrap();
     println!("Metrics server listening on http://0.0.0.0:9091/metrics");
-    axum::serve(listener, app).await.unwrap();
+    let server_handle = axum::serve(listener, app);
+
+    // run both the server and stdout concurrently
+    select! {
+         _ = stdout_handle => {
+            println!("Metrics printing task ended");
+        }
+        _ = server_handle => {
+            println!("Server task ended");
+        }
+    }
 
     Ok(())
-
 }
 
-async fn metrics_handler(registry: State<Arc<Registry>>) -> impl IntoResponse {
+async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
+    state
+        .gpuprobe
+        .lock()
+        .await
+        .collect_metrics_uprobes()
+        .unwrap();
     let mut buffer = String::new();
-    match encode(&mut buffer, &registry) {
+    match encode(&mut buffer, &state.registry) {
         Ok(()) => (StatusCode::OK, buffer),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, String::new()),
     }
