@@ -2,9 +2,8 @@ use std::error::Error;
 
 use libbpf_rs::{MapCore, MapFlags};
 
-use super::{Gpuprobe, GpuprobeError, DEFAULT_LINKS};
-
-const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
+use super::uprobe_data::MemleakData;
+use super::{Gpuprobe, GpuprobeError, LIBCUDART_PATH};
 
 /// contains implementation for the memleak program
 impl Gpuprobe {
@@ -39,14 +38,10 @@ impl Gpuprobe {
             .attach_uprobe(true, -1, LIBCUDART_PATH, 0x00000000000568c0)
             .map_err(|_| GpuprobeError::AttachError)?;
 
-        let mut links = DEFAULT_LINKS;
-        links.trace_cuda_malloc = Some(cuda_malloc_uprobe_link);
-        links.trace_cuda_malloc_ret = Some(cuda_malloc_uretprobe_link);
-        links.trace_cuda_free = Some(cuda_free_uprobe_link);
-        links.trace_cuda_free_ret = Some(cuda_free_uretprobe_link);
-        links.trace_cuda_launch_kernel = None;
-        self.links = links;
-
+        self.links.trace_cuda_malloc = Some(cuda_malloc_uprobe_link);
+        self.links.trace_cuda_malloc_ret = Some(cuda_malloc_uretprobe_link);
+        self.links.trace_cuda_free = Some(cuda_free_uprobe_link);
+        self.links.trace_cuda_free_ret = Some(cuda_free_uretprobe_link);
         Ok(())
     }
 
@@ -76,17 +71,19 @@ impl Gpuprobe {
 
     /// returns a map of outsanding cuda memory allocations - i.e. ones that
     /// have not yet been freed
-    pub fn get_outstanding_allocs(&mut self) -> Result<Vec<(u64, u64)>, Box<dyn Error>> {
-        Ok(self
+    pub fn collect_data_memleak(&mut self) -> Result<MemleakData, GpuprobeError> {
+        let outstanding_allocs: Vec<(u64, u64)> = self
             .skel
             .maps
             .successful_allocs
             .keys()
             .map(|addr| {
                 self.addr_to_allocation(addr)
-                    .expect("unable to convert alloc")
+                    .expect("failed to get allocation")
             })
             .filter(|(_, size)| size > &0)
-            .collect())
+            .collect();
+
+        Ok(MemleakData { outstanding_allocs })
     }
 }

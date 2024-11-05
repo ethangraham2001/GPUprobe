@@ -7,6 +7,7 @@ mod gpuprobe {
 
 use libbpf_rs::{MapCore, MapFlags};
 
+use super::uprobe_data::CudaTraceData;
 use super::{Gpuprobe, GpuprobeError, DEFAULT_LINKS, LIBCUDART_PATH};
 
 /// contains implementations for the cudatrace program
@@ -21,10 +22,7 @@ impl Gpuprobe {
             .attach_uprobe(false, -1, LIBCUDART_PATH, 0x0000000000074440)
             .map_err(|_| GpuprobeError::AttachError)?;
 
-        let mut links = DEFAULT_LINKS;
-        links.trace_cuda_launch_kernel = Some(cuda_launch_kernel_uprobe_link);
-        self.links = links;
-
+        self.links.trace_cuda_launch_kernel = Some(cuda_launch_kernel_uprobe_link);
         Ok(())
     }
 
@@ -34,8 +32,8 @@ impl Gpuprobe {
     /// ASLR and other factors. We would ideally like to resolve which kernel
     /// is being launched by looking at the relative addresses inside of the
     /// cuda binary.
-    pub fn get_kernel_launch_frequencies(&self) -> Result<Vec<(u64, u64)>, GpuprobeError> {
-        Ok(self
+    pub fn collect_data_cudatrace(&self) -> Result<CudaTraceData, GpuprobeError> {
+        let hist: Vec<(u64, u64)> = self
             .skel
             .maps
             .kernel_calls_hist
@@ -52,6 +50,10 @@ impl Gpuprobe {
                 let call_count: [u8; 8] = call_count.try_into().expect("unable to convert count");
                 (u64::from_ne_bytes(key), u64::from_ne_bytes(call_count))
             })
-            .collect())
+            .collect();
+
+        Ok(CudaTraceData {
+            kernel_frequencies_histogram: hist,
+        })
     }
 }

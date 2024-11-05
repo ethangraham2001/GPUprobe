@@ -7,7 +7,8 @@ mod gpuprobe {
 
 use libbpf_rs::MapCore;
 
-use super::{Gpuprobe, GpuprobeError, DEFAULT_LINKS, LIBCUDART_PATH};
+use super::uprobe_data::BandwidthUtilData;
+use super::{Gpuprobe, GpuprobeError, LIBCUDART_PATH};
 
 impl Gpuprobe {
     /// attaches uprobes for the bandwidth util program, or returns an error on
@@ -27,16 +28,14 @@ impl Gpuprobe {
             .attach_uprobe(true, -1, LIBCUDART_PATH, 0x000000000006f150)
             .map_err(|_| GpuprobeError::AttachError)?;
 
-        let mut links = DEFAULT_LINKS;
-        links.trace_cuda_memcpy = Some(cuda_memcpy_uprobe_link);
-        links.trace_cuda_memcpy_ret = Some(cuda_memcpy_uretprobe_link);
-        self.links = links;
+        self.links.trace_cuda_memcpy = Some(cuda_memcpy_uprobe_link);
+        self.links.trace_cuda_memcpy_ret = Some(cuda_memcpy_uretprobe_link);
         Ok(())
     }
 
     /// Copies all cudaMemcpy calls out of the queue and returns them as a Vec,
     /// or returns a GpuProbeError on failure
-    pub fn consume_queue(&self) -> Result<Vec<CudaMemcpy>, GpuprobeError> {
+    pub fn collect_data_bandwidth_util(&self) -> Result<BandwidthUtilData, GpuprobeError> {
         let mut output: Vec<CudaMemcpy> = Vec::new();
         let key: [u8; 0] = []; // key size must be zero for BPF_MAP_TYPE_QUEUE
                                // `lookup_and_delete` calls.
@@ -57,12 +56,19 @@ impl Gpuprobe {
                     }
                 },
                 None => {
-                    return Ok(output);
+                    // This case suggests that a queue entry has no data. If
+                    // this occurs, it indicates a problem with the eBPF
+                    // program, so we return a runtime error.
+                    return Err(GpuprobeError::RuntimeError(
+                        "Found None data for key during lookup".to_string(),
+                    ));
                 }
             }
         }
 
-        Ok(output)
+        Ok(BandwidthUtilData {
+            cuda_memcpys: output,
+        })
     }
 }
 
