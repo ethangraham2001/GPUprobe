@@ -56,9 +56,12 @@ impl Gpuprobe {
                     }
                 },
                 None => {
-                    return Ok(BandwidthUtilData {
-                        cuda_memcpys: output,
-                    });
+                    // This case suggests that a queue entry has no data. If
+                    // this occurs, it indicates a problem with the eBPF
+                    // program, so we return a runtime error.
+                    return Err(GpuprobeError::RuntimeError(
+                        "Found None data for key during lookup".to_string(),
+                    ));
                 }
             }
         }
