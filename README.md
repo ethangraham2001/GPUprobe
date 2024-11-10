@@ -1,9 +1,16 @@
 # GPUprobe
 
-Provides some eBPF utilities for tracking GPU actvity from user-space via
-uprobes. 
+GPUprobe *(GPU probe, GP-uprobe)* provides utilities for observability
+of GPU behavior via their interaction with the Cuda runtime API by leveraging 
+eBPF uprobes.
 
-Three utilies are currently available:
+The project is experimental, and still immature. However, some cool 
+functionality is already available, which will be discussed below.
+
+For information on building and running, refer to the 
+[short guide](#building-and-running) on the subject.
+
+## Usage
 
 ```
 Usage: gpu_probe [OPTIONS]
@@ -16,77 +23,77 @@ Options:
   -V, --version         Print version
 ```
 
-## Memleak utility
+## High-level Design
 
-The following is a sample output from the memleak utility displaying the 
-allocations made by a program that does the following
+Metrics are exported in [OpenMetrics](https://github.com/prometheus/OpenMetrics/blob/main/specification/OpenMetrics.md) 
+format via an http handler, which is intended to be scraped by Prometheus. This
+allows for seamless integration with your favorite observability stack, e.g.
+Grafana.
 
-- calls `cudaMalloc()` three times
-- performs some computation some time
-- calls `cudaFree()` for two of the input arrays, forgetting the third one
+![Grafana plotting aggregated Cuda memory leaks](readme-assets/memleaks-grafana.png)
 
-```
-GPUprobe memleak utility
-========================
-
-
-total number of `cudaMalloc` calls: 0
-0 bytes leaked from 0 cuda memory allocation(s)
-========================
-
-total number of `cudaMalloc` calls: 3
-25165824 bytes leaked from 3 cuda memory allocation(s)
-        0x769af1400000: 8388608 bytes
-        0x769aec000000: 8388608 bytes
-        0x769af0c00000: 8388608 bytes
-========================
-
-total number of `cudaMalloc` calls: 3
-25165824 bytes leaked from 3 cuda memory allocation(s)
-        0x769af1400000: 8388608 bytes
-        0x769aec000000: 8388608 bytes
-        0x769af0c00000: 8388608 bytes
-========================
-
-total number of `cudaMalloc` calls: 3
-8388608 bytes leaked from 1 cuda memory allocation(s)
-        0x769aec000000: 8388608 bytes
-========================
-```
-
-## CudaTrace utility
-
-In this sample output, a cuda program is executed that runs a 1000-iteration 
-loop that launches two kernels per iteration.
+These metrics are also displayed periodically to stdout in their raw format.
 
 ```
-GPUprobe cudatrace utility
-========================
-
-
-0 `cudaLaunchKernel` calls for 0 kernels
-========================
-
-1194 `cudaLaunchKernel` calls for 2 kernels
-        0x626693de7b80: 597 launches
-        0x626693de7c60: 597 launches
-========================
-
-2000 `cudaLaunchKernel` calls for 2 kernels
-        0x626693de7b80: 1000 launches
-        0x626693de7c60: 1000 launches
-========================
-
-2000 `cudaLaunchKernel` calls for 2 kernels
-        0x626693de7b80: 1000 launches
-        0x626693de7c60: 1000 launches
-========================
+# HELP total_cuda_mallocs Total number of cudaMalloc calls.
+# TYPE total_cuda_mallocs gauge
+total_cuda_mallocs 4
+# HELP cuda_memory_leaks Cuda memory leak statistics.
+# TYPE cuda_memory_leaks gauge
+cuda_memory_leaks{addr="136071811694592"} 8000000
+cuda_memory_leaks{addr="130222334672896"} 8000000
+cuda_memory_leaks{addr="131679335219200"} 8000000
+cuda_memory_leaks{addr="131251381993472"} 8000000
+# HELP cuda_kernel_launches Cuda kernel launch statistics.
+# TYPE cuda_kernel_launches gauge
+cuda_kernel_launches{addr="109501748239152"} 1000
+cuda_kernel_launches{addr="108636571265616"} 1000
+cuda_kernel_launches{addr="110755787352656"} 1000
+cuda_kernel_launches{addr="108636571265840"} 1000
+cuda_kernel_launches{addr="95213067594320"} 1000
+cuda_kernel_launches{addr="110755787352880"} 1000
+cuda_kernel_launches{addr="95213067594544"} 1000
+cuda_kernel_launches{addr="109501748238928"} 1000
+# EOF
 ```
 
-## Bandwidth utilization utility
+The various features are opt-in via command-line arguments passed to the 
+program at launch. 
 
-In this sample output, we infer the average bandwidth utilization of calls to
-`cudaMemcpy`, a well as the direction of the transfers and their durations.
+The metrics exported will still include those related to an disabled feature,
+but will be empty. The difference is that the uprobes related to that feature
+will not be attached, resulting in a lower-runtime overhead for relevant Cuda
+runtime API calls and a lower memory footprint for the program.
+
+**E.g.** running `gpuprobe --memleak` will only attach the uprobes needed for
+the memleak feature, but the empty metrics for the cudatrace program will still
+be exported by the OpenMetrics exporter.
+
+## Memleak feature
+
+This utility correlates a call to `cudaFree()` to the associated call to 
+`cudaMalloc()`, allowing for a measurement of the number of leaked bytes 
+related to a Cuda virtual address.
+
+## CudaTrace feature
+
+This utility keeps stats on the launched kernels and number of times that they
+were launched as a pair `(func_addr, count)`. It can be thought of and
+aggregated as a histogram of the frequencies of kernel launches.
+
+## Bandwidth utilization feature
+
+This feature approximates bandwidth utilization on the bus between host and 
+device as a function of execution time and size of a `cudaMemcpy()` call.
+
+This is computed naively with: `throughput = count / (end - start)`
+
+Note that this only plausibly works for host-to-device *(H2D)* and
+device-to-host *(D2H)* copies, as only these calls provide any guarantees of
+synchronicity.
+
+This feature is not yet exported. Below you will find a sample output of an 
+older iteration that simply wrote the results to stdout.
 
 ```
 GPUprobe bandwidth_util utility
@@ -103,8 +110,27 @@ Traced 2 cudaMemcpy calls
 ========================
 ```
 
-This is computed naively with
+## Building and Running
 
+An eBPF compatible Linux kernel version is required for running GPUprobe, as
+well as `bpftool`.
+
+A `vmlinux.h` file is required for the build process, which can be created
+by executing the following command from the project root:
+
+```bash
+bpftool btf dump file /sys/kernel/btf/vmlinux format c > src/bpf/vmlinux.h
 ```
-throughput = count / (end - start)
+
+Following that, you should be able to build the project.
+
+```bash
+cargo build
+```
+
+Root privileges are required to run the project due to its attaching of eBPF
+uprobes.
+
+```bash
+sudo ./gpu_probe # --options
 ```

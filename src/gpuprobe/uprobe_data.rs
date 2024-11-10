@@ -1,8 +1,5 @@
 use super::gpuprobe_bandwidth_util::CudaMemcpy;
 
-/// Defines the data collected by a uprobe / uretprobe
-pub trait UprobeData: std::fmt::Display /* add prometheus */ {}
-
 /// defines the data that is collected in a cycle of the memleak program
 pub struct MemleakData {
     /// a Vec of `(addr, count)` where:
@@ -10,8 +7,6 @@ pub struct MemleakData {
     ///     - `count` is the number of bytes associated to that allocation
     pub outstanding_allocs: Vec<(u64, u64)>,
 }
-
-impl UprobeData for MemleakData {}
 
 /// defines the data that is collected in a cycle of the cudatrace program
 pub struct CudaTraceData {
@@ -21,15 +16,11 @@ pub struct CudaTraceData {
     pub kernel_frequencies_histogram: Vec<(u64, u64)>,
 }
 
-impl UprobeData for CudaTraceData {}
-
 /// defines the data that is collected in a cycle of the cudatrace program
 pub struct BandwidthUtilData {
     /// a Vec of `CudaMemcpy` calls
     pub cuda_memcpys: Vec<CudaMemcpy>,
 }
-
-impl UprobeData for BandwidthUtilData {}
 
 impl std::fmt::Display for MemleakData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

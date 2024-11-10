@@ -1,10 +1,12 @@
+pub mod collector;
 pub mod gpuprobe_bandwidth_util;
 pub mod gpuprobe_cudatrace;
 pub mod gpuprobe_memleak;
+pub mod metrics;
 pub mod uprobe_data;
 
+use metrics::GpuprobeMetrics;
 use std::mem::MaybeUninit;
-use uprobe_data::UprobeData;
 
 use libbpf_rs::{
     skel::{OpenSkel, SkelBuilder},
@@ -19,7 +21,34 @@ mod gpuprobe {
 }
 use gpuprobe::*;
 
+use self::metrics::AddrLabel;
+
 const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
+
+pub struct SafeGpuprobeLinks {
+    links: GpuprobeLinks,
+}
+
+pub struct SafeGpuprobeSkel {
+    // E.G: For now we settle for this questionable behavior - we are
+    // interacting with eBPF skeleton, managing the lifetime of a
+    // kernel-attached eBPF program. At this stage I am not sure we can do
+    // better than a static lifetime on this parameter.
+    skel: GpuprobeSkel<'static>,
+}
+
+pub struct SafeGpuProbeObj {
+    open_obj: Box<MaybeUninit<OpenObject>>,
+}
+
+unsafe impl Send for SafeGpuprobeSkel {}
+unsafe impl Sync for SafeGpuprobeSkel {}
+
+unsafe impl Send for SafeGpuprobeLinks {}
+unsafe impl Sync for SafeGpuprobeLinks {}
+
+unsafe impl Send for SafeGpuProbeObj {}
+unsafe impl Sync for SafeGpuProbeObj {}
 
 /// Gpuuprobe wraps the eBPF program state, provides an interface for
 /// attaching relevant uprobes, and exporting their metrics.
@@ -27,14 +56,14 @@ const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
 /// !!TODO!! maybe consider using orobouros self-referential instead of the
 /// static lifetime
 pub struct Gpuprobe {
-    open_obj: Box<MaybeUninit<OpenObject>>,
-    pub skel: GpuprobeSkel<'static>, // trust me bro
-    links: GpuprobeLinks,
+    obj: SafeGpuProbeObj,
+    skel: SafeGpuprobeSkel, // references a static lifetime! See struct def
+    links: SafeGpuprobeLinks,
     opts: Opts,
-    /// data that should be exported next time queried by prometheus
-    data_to_export: Vec<Box<dyn UprobeData>>,
+    pub metrics: GpuprobeMetrics,
 }
 
+#[derive(Clone, Debug)]
 pub struct Opts {
     pub memleak: bool,
     pub cudatrace: bool,
@@ -63,37 +92,47 @@ impl Gpuprobe {
                 .map_err(|_| GpuprobeError::OpenError)?
         };
         let skel = open_skel.load().map_err(|_| GpuprobeError::LoadError)?;
+        let metrics = GpuprobeMetrics::new(opts.clone())?;
         Ok(Self {
-            open_obj,
-            skel,
-            links: DEFAULT_LINKS,
+            obj: SafeGpuProbeObj { open_obj },
+            skel: SafeGpuprobeSkel { skel },
+            links: SafeGpuprobeLinks {
+                links: DEFAULT_LINKS,
+            },
             opts,
-            data_to_export: vec![],
+            metrics,
         })
     }
 
-    pub fn collect_data_uprobes(&mut self) -> Result<(), GpuprobeError> {
-        let mut data: Vec<Box<dyn UprobeData>> = vec![];
-
+    /// Collects metrics from the attached uprobes and updates the the
+    /// GpuMetrics Prometheus metrics.
+    pub fn collect_metrics_uprobes(&mut self) -> Result<(), GpuprobeError> {
+        // updates memory leak stats
         if self.opts.memleak {
             let memleak_data = self.collect_data_memleak()?;
-            data.push(Box::new(memleak_data));
+
+            self.metrics
+                .num_mallocs
+                .set(memleak_data.outstanding_allocs.len() as i64);
+            for (addr, count) in memleak_data.outstanding_allocs {
+                self.metrics
+                    .memleaks
+                    .get_or_create(&AddrLabel { addr })
+                    .set(count as i64);
+            }
         }
+        // updates kernel launch stats
         if self.opts.cudatrace {
             let cudatrace_data = self.collect_data_cudatrace()?;
-            data.push(Box::new(cudatrace_data));
-        }
-        if self.opts.bandwidth_util {
-            let bandwidth_util_data = self.collect_data_bandwidth_util()?;
-            data.push(Box::new(bandwidth_util_data));
-        }
-
-        // display data to stdout
-        for d in data.into_iter() {
-            println!("{d}");
-            self.data_to_export.push(d); // move occurs here
+            for (addr, count) in cudatrace_data.kernel_frequencies_histogram {
+                self.metrics
+                    .kernel_launches
+                    .get_or_create(&AddrLabel { addr })
+                    .set(count as i64);
+            }
         }
 
+        // !!TODO update bandwidth statistics as well
         Ok(())
     }
 
