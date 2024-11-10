@@ -52,18 +52,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gpuprobe = Mutex::new(gpuprobe);
     let gpuprobe = Arc::new(gpuprobe);
 
+    // clones that are passed to the task that displays to stdout
     let gpuprobe_clone = Arc::clone(&gpuprobe);
     let registry_clone = Arc::clone(&registry);
 
-    // Create router with metrics endpoint
     let app = Router::new()
         .route("/metrics", get(metrics_handler))
         .with_state(AppState { gpuprobe, registry });
 
-    // task that displays to stdout periodically
+    // a simple task that periodically displays metrics in their raw 
+    // OpenMetrics format to stdout
     let stdout_handle = tokio::spawn(async move {
         loop {
-            // Access gpuprobe through the mutex
             let mut probe = gpuprobe_clone.lock().await;
             probe.collect_metrics_uprobes().unwrap();
 
@@ -71,7 +71,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             encode(&mut buff, &registry_clone).unwrap();
             println!("{buff}");
 
-            // Optional: Add delay between iterations
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
     });
@@ -79,7 +78,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:9091").await.unwrap();
     let server_handle = axum::serve(listener, app);
 
-    // runs both the server output and the stdout reporting concurrently
     select! {
          _ = stdout_handle => {
             println!("Metrics printing task ended");
@@ -92,6 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Handler for the endpoint that is scraped by Prometheus
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     state
         .gpuprobe
