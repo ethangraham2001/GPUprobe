@@ -24,10 +24,6 @@ struct Args {
     /// Approximates bandwidth utilization of cudaMemcpy.
     #[arg(long, exclusive = false)]
     bandwidth_util: bool,
-
-    /// If set to true, will display verbose output
-    #[arg(long, exclusive = false)]
-    verbose: bool,
 }
 
 #[derive(Clone)]
@@ -81,10 +77,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:9091").await.unwrap();
-    println!("Metrics server listening on http://0.0.0.0:9091/metrics");
     let server_handle = axum::serve(listener, app);
 
-    // run both the server and stdout concurrently
+    // runs both the server output and the stdout reporting concurrently
     select! {
          _ = stdout_handle => {
             println!("Metrics printing task ended");

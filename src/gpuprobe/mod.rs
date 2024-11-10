@@ -6,7 +6,7 @@ pub mod metrics;
 pub mod uprobe_data;
 
 use metrics::GpuprobeMetrics;
-use std::{mem::MaybeUninit, sync::Mutex};
+use std::mem::MaybeUninit;
 
 use libbpf_rs::{
     skel::{OpenSkel, SkelBuilder},
