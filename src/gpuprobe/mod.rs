@@ -4,6 +4,7 @@ pub mod gpuprobe_memleak;
 pub mod metrics;
 pub mod uprobe_data;
 
+use chrono::Local;
 use metrics::GpuprobeMetrics;
 use std::mem::MaybeUninit;
 
@@ -103,9 +104,8 @@ impl Gpuprobe {
         })
     }
 
-    /// Collects metrics from the attached uprobes and updates the the
-    /// GpuMetrics Prometheus metrics.
-    pub fn collect_metrics_uprobes(&mut self) -> Result<(), GpuprobeError> {
+    /// Updates prometheus metrics registered by the GPUprobe instance
+    pub fn export_open_metrics(&mut self) -> Result<(), GpuprobeError> {
         // updates memory leak stats
         if self.opts.memleak {
             let memleak_data = self.collect_data_memleak()?;
@@ -130,6 +130,34 @@ impl Gpuprobe {
                     .set(count as i64);
             }
         }
+
+        // !!TODO update bandwidth statistics as well
+        Ok(())
+    }
+
+    /// Displays metrics collected by the GPUprobe instance
+    /// Note: this causes metrics to be recollected from the eBPF Maps, which
+    /// had non-zero interference with the eBPF uprobes.
+    pub fn display_metrics(&mut self) -> Result<(), GpuprobeError> {
+        let now = Local::now();
+        let formatted_datetime = now.format("%Y-%m-%d %H:%M:%S").to_string();
+        println!("========================");
+        println!("{}\n", formatted_datetime);
+
+        if self.opts.memleak {
+            let memleak_data = self.collect_data_memleak()?;
+            println!("{}", memleak_data);
+        }
+        if self.opts.cudatrace {
+            let cudatrace_data = self.collect_data_cudatrace()?;
+            println!("{}", cudatrace_data);
+        }
+        if self.opts.bandwidth_util {
+            let bandwidth_util_data = self.collect_data_bandwidth_util()?;
+            println!("{}", bandwidth_util_data);
+        }
+
+        println!("========================");
 
         // !!TODO update bandwidth statistics as well
         Ok(())
