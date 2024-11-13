@@ -1,4 +1,3 @@
-pub mod collector;
 pub mod gpuprobe_bandwidth_util;
 pub mod gpuprobe_cudatrace;
 pub mod gpuprobe_memleak;
