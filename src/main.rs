@@ -54,7 +54,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // clones that are passed to the task that displays to stdout
     let gpuprobe_clone = Arc::clone(&gpuprobe);
-    let registry_clone = Arc::clone(&registry);
 
     let app = Router::new()
         .route("/metrics", get(metrics_handler))
@@ -65,12 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stdout_handle = tokio::spawn(async move {
         loop {
             let mut probe = gpuprobe_clone.lock().await;
-            probe.collect_metrics_uprobes().unwrap();
-
-            let mut buff = String::new();
-            encode(&mut buff, &registry_clone).unwrap();
-            println!("{buff}");
-
+            probe.display_metrics().unwrap();
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
     });
@@ -92,12 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Handler for the endpoint that is scraped by Prometheus
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
-    state
-        .gpuprobe
-        .lock()
-        .await
-        .collect_metrics_uprobes()
-        .unwrap();
+    state.gpuprobe.lock().await.export_open_metrics().unwrap();
     let mut buffer = String::new();
     match encode(&mut buffer, &state.registry) {
         Ok(()) => (StatusCode::OK, buffer),
