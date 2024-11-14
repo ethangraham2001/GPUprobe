@@ -24,6 +24,14 @@ struct Args {
     /// Approximates bandwidth utilization of cudaMemcpy.
     #[arg(long, exclusive = false)]
     bandwidth_util: bool,
+
+    /// Address for the Prometheus metrics endpoint.
+    #[arg(long, default_value = "0.0.0.0:9091")]
+    metrics_addr: String,
+
+    /// Interval in seconds for displaying metrics to stdout.
+    #[arg(long, default_value_t = 5)]
+    display_interval: u64,
 }
 
 #[derive(Clone)]
@@ -65,11 +73,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             let mut probe = gpuprobe_clone.lock().await;
             probe.display_metrics().unwrap();
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            tokio::time::sleep(Duration::from_secs(args.display_interval)).await;
         }
     });
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:9091").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(&args.metrics_addr).await.unwrap();
     let server_handle = axum::serve(listener, app);
 
     select! {
