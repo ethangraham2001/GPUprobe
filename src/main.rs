@@ -26,7 +26,7 @@ struct Args {
     bandwidth_util: bool,
 
     /// Address for the Prometheus metrics endpoint.
-    #[arg(long, default_value = "0.0.0.0:9091")]
+    #[arg(long, default_value = "0.0.0.0:9000")]
     metrics_addr: String,
 
     /// Interval in seconds for displaying metrics to stdout.
