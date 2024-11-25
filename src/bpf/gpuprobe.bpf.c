@@ -3,157 +3,156 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
-struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__type(key, u32);
-	__type(value, u64);
-	__uint(max_entries, 1);
-} num_cuda_malloc_calls SEC(".maps");
-
-struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__type(key, u32);
-	__type(value, u64);
-	__uint(max_entries, 1);
-} cuda_malloc_failures SEC(".maps");
+enum memleak_event_t {
+	CUDA_MALLOC = 0,
+	CUDA_FREE,
+};
 
 /**
- * cuda memory allocations that have been launched
+ * Wraps the arguments passed to `cudaMalloc` or `cudaFree`, and return code,
+ * and some metadata
+ */
+struct memleak_event {
+	enum memleak_event_t event_type;
+	u32 pid;
+	u64 start;
+	u64 end;
+
+	void *device_addr;
+	/// contains the allocation size if event_type == CUDA_MALLOC
+	size_t size;
+	int ret;
+};
+
+/**
+ * Several required data and metadata fields of a memleak event can only be 
+ * read from the initial uprobe, but are needed in order to emit events from
+ * the uretprobe on return. We map pid to the started event, which is then
+ * read and cleared from the uretprobe. This works under the assumption that
+ * only one instance of either `cudaMalloc` or `cudaFree` is being executed at
+ * a time per process.
  */
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, u64);
-	__type(value, size_t);
-	__uint(max_entries, 10240);
-} launched_allocs SEC(".maps");
+	__type(key, u32);
+	__type(value, struct memleak_event);
+	__uint(max_entries, 1024);
+} memleak_pid_to_event SEC(".maps");
 
-/**
- * cuda memory allocations that have succeeded
- */
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, u64);
-	__type(value, size_t);
-	__uint(max_entries, 10240);
-} successful_allocs SEC(".maps");
-
-/**
- * The passed `dev_ptr` parameter can only be read from the inital uprobe. We
- * store it before execution so that we can read the virtual address of the
- * device in the uretprobe
- */
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__type(key, u32);
 	__type(value, void **);
-	__uint(max_entries, 10240);
-} pid_to_dev_ptr SEC(".maps");
+	__uint(max_entries, 1024);
+} memleak_pid_to_dev_ptr SEC(".maps");
 
-void **ptr_addr;
+/**
+ * Queue of memleak events that are updated from eBPF space, then dequeued
+ * and processed from userspace by the GPUprobe daemon.
+ */
+struct {
+	__uint(type, BPF_MAP_TYPE_QUEUE);
+	__uint(key_size, 0);
+	__type(value, struct memleak_event);
+	__uint(max_entries, 1024);
+} memleak_events_queue SEC(".maps");
 
+/// uprobe triggered by a call to `cudaMalloc`
 SEC("uprobe/cudaMalloc")
-int trace_cuda_malloc(struct pt_regs *ctx)
+int memleak_cuda_malloc(struct pt_regs *ctx)
 {
-	u32 key0 = 0;
-	u64 *num_mallocs;
-	u32 pid;
+	struct memleak_event e;
 	void **dev_ptr;
-	size_t size;
+	u32 pid, key0 = 0;
 
-	num_mallocs = bpf_map_lookup_elem(&num_cuda_malloc_calls, &key0);
-	if (num_mallocs) {
-		__sync_fetch_and_add(num_mallocs, 1);
+	e.size = (size_t)PT_REGS_PARM2(ctx);
+	dev_ptr = (void **)PT_REGS_PARM1(ctx);
+	pid = (u32)bpf_get_current_pid_tgid();
+
+	e.event_type = CUDA_MALLOC;
+	e.start = bpf_ktime_get_ns();
+	e.pid = pid;
+
+	if (bpf_map_update_elem(&memleak_pid_to_event, &pid, &e, 0)) {
+		return -1;
 	}
 
-	dev_ptr = (void **)PT_REGS_PARM1(ctx);
-	size = (size_t)PT_REGS_PARM2(ctx);
-	bpf_map_update_elem(&launched_allocs, &dev_ptr, &size, 0);
-
-	pid = (u32)bpf_get_current_pid_tgid();
-	return bpf_map_update_elem(&pid_to_dev_ptr, &pid, &dev_ptr, 0);
+	return bpf_map_update_elem(&memleak_pid_to_dev_ptr, &pid, &dev_ptr, 0);
 }
 
+/// uretprobe triggered when `cudaMalloc` returns
 SEC("uretprobe/cudaMalloc")
-int trace_cuda_malloc_ret(struct pt_regs *ctx)
+int memleak_cuda_malloc_ret(struct pt_regs *ctx)
 {
 	int cuda_malloc_ret;
 	u32 pid, key0 = 0;
 	size_t *size, *num_failures;
-	void *alloc_ptr;
+	struct memleak_event *e;
 	void **dev_ptr;
 	void ***map_ptr;
 
 	cuda_malloc_ret = (int)PT_REGS_RC(ctx);
-	if (cuda_malloc_ret) {
-		num_failures =
-			bpf_map_lookup_elem(&cuda_malloc_failures, &key0);
-		if (num_failures)
-			__sync_fetch_and_add(num_failures, 1);
-	}
-
 	pid = (u32)bpf_get_current_pid_tgid();
-	map_ptr = bpf_map_lookup_elem(&pid_to_dev_ptr, &pid);
 
-	if (!map_ptr)
+	e = bpf_map_lookup_elem(&memleak_pid_to_event, &pid);
+	if (!e) {
 		return -1;
+	}
 
+	e->ret = cuda_malloc_ret;
+
+	// lookup the value of `devPtr` passed to `cudaMalloc` by this process
+	map_ptr = (void ***)bpf_map_lookup_elem(&memleak_pid_to_dev_ptr, &pid);
+	if (!map_ptr) {
+		return -1;
+	}
 	dev_ptr = *map_ptr;
-	if (bpf_probe_read_user(&alloc_ptr, sizeof(alloc_ptr), dev_ptr)) {
+
+	// read the value copied into `*devPtr` by `cudaMalloc` from userspace
+	if (bpf_probe_read_user(&e->device_addr, sizeof(void *), dev_ptr)) {
 		return -1;
 	}
 
-	size = bpf_map_lookup_elem(&launched_allocs, &dev_ptr);
-	if (!size) {
-		return -1;
-	}
+	e->end = bpf_ktime_get_ns();
 
-	return bpf_map_update_elem(&successful_allocs, &alloc_ptr, size, 0);
+	return bpf_map_push_elem(&memleak_events_queue, e, 0);
 }
 
+/// uprobe triggered by a call to `cudaFree`
 SEC("uprobe/cudaFree")
 int trace_cuda_free(struct pt_regs *ctx)
 {
-	bpf_printk("called cudaFree");
-	u32 pid;
-	void *dev_ptr;
+	struct memleak_event e = { 0 };
 
-	dev_ptr = (void **)PT_REGS_PARM1(ctx);
-	pid = (u32)bpf_get_current_pid_tgid();
+	e.event_type = CUDA_FREE;
+	e.pid = (u32)bpf_get_current_pid_tgid();
+	e.start = bpf_ktime_get_ns();
+	e.device_addr = (void **)PT_REGS_PARM1(ctx);
 
-	if (bpf_map_update_elem(&pid_to_dev_ptr, &pid, &dev_ptr, 0)) {
-		bpf_printk("failed to update dev_ptr cudaFree");
-	}
-
-	return 0;
+	return bpf_map_update_elem(&memleak_pid_to_event, &e.pid, &e, 0);
 }
 
+/// uretprobe triggered when `cudaFree` returns
 SEC("uretprobe/cudaFree")
 int trace_cuda_free_ret(struct pt_regs *ctx)
 {
 	int cuda_free_ret;
 	u32 pid;
-	void *dev_ptr;
-	void **map_ptr;
+	struct memleak_event *e;
 	size_t zero = 0;
 
-	cuda_free_ret = PT_REGS_RC(ctx);
-	if (cuda_free_ret) {
-		return -1;
-	}
-
 	pid = (u32)bpf_get_current_pid_tgid();
-	map_ptr = bpf_map_lookup_elem(&pid_to_dev_ptr, &pid);
 
-	if (!map_ptr) {
+	e = (struct memleak_event *)bpf_map_lookup_elem(&memleak_pid_to_event,
+							&pid);
+	if (!e) {
 		return -1;
 	}
 
-	dev_ptr = *map_ptr;
-	if (bpf_map_update_elem(&successful_allocs, &dev_ptr, &zero, 0)) {
-		return -1;
-	}
+	e->end = bpf_ktime_get_ns();
+	e->ret = PT_REGS_RC(ctx);
 
-	return 0;
+	return bpf_map_push_elem(&memleak_events_queue, e, 0);
 }
 
 /**
