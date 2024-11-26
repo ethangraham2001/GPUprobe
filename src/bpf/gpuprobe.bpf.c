@@ -13,15 +13,14 @@ enum memleak_event_t {
  * and some metadata
  */
 struct memleak_event {
-	enum memleak_event_t event_type;
-	u32 pid;
-	u64 start;
-	u64 end;
-
+	__u64 start;
+	__u64 end;
 	void *device_addr;
+	__u64 size;
+	__u32 pid;
 	/// contains the allocation size if event_type == CUDA_MALLOC
-	size_t size;
-	int ret;
+	int32 ret;
+	enum memleak_event_t event_type;
 };
 
 /**
@@ -61,7 +60,7 @@ struct {
 SEC("uprobe/cudaMalloc")
 int memleak_cuda_malloc(struct pt_regs *ctx)
 {
-	struct memleak_event e;
+	struct memleak_event e = { 0 };
 	void **dev_ptr;
 	u32 pid, key0 = 0;
 

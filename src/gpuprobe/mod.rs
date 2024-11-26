@@ -21,6 +21,7 @@ mod gpuprobe {
 }
 use gpuprobe::*;
 
+use self::gpuprobe_memleak::MemleakProgramData;
 use self::metrics::AddrLabel;
 
 const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
@@ -61,6 +62,8 @@ pub struct Gpuprobe {
     links: SafeGpuprobeLinks,
     opts: Opts,
     pub metrics: GpuprobeMetrics,
+
+    memleak_data: MemleakProgramData,
 }
 
 #[derive(Clone, Debug)]
@@ -71,8 +74,8 @@ pub struct Opts {
 }
 
 const DEFAULT_LINKS: GpuprobeLinks = GpuprobeLinks {
-    trace_cuda_malloc: None,
-    trace_cuda_malloc_ret: None,
+    memleak_cuda_malloc: None,
+    memleak_cuda_malloc_ret: None,
     trace_cuda_free: None,
     trace_cuda_free_ret: None,
     trace_cuda_launch_kernel: None,
@@ -101,6 +104,7 @@ impl Gpuprobe {
             },
             opts,
             metrics,
+            memleak_data: MemleakProgramData::new(),
         })
     }
 
