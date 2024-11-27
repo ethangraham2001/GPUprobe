@@ -21,7 +21,7 @@ mod gpuprobe {
 }
 use gpuprobe::*;
 
-use self::gpuprobe_memleak::MemleakProgramData;
+use self::gpuprobe_memleak::MemleakState;
 use self::metrics::AddrLabel;
 
 const LIBCUDART_PATH: &str = "/usr/local/cuda/lib64/libcudart.so";
@@ -62,8 +62,7 @@ pub struct Gpuprobe {
     links: SafeGpuprobeLinks,
     opts: Opts,
     pub metrics: GpuprobeMetrics,
-
-    memleak_data: MemleakProgramData,
+    memleak_state: MemleakState,
 }
 
 #[derive(Clone, Debug)]
@@ -104,7 +103,7 @@ impl Gpuprobe {
             },
             opts,
             metrics,
-            memleak_data: MemleakProgramData::new(),
+            memleak_state: MemleakState::new(),
         })
     }
 
@@ -112,17 +111,31 @@ impl Gpuprobe {
     pub fn export_open_metrics(&mut self) -> Result<(), GpuprobeError> {
         // updates memory leak stats
         if self.opts.memleak {
-            let memleak_data = self.collect_data_memleak()?;
+            // todo GC cycle for cleaning up memory maps??
+            self.memleak_state.cleanup_terminated_processes()?;
+            self.consume_memleak_events()?;
 
             self.metrics
                 .num_mallocs
-                .set(memleak_data.outstanding_allocs.len() as i64);
-            for (addr, count) in memleak_data.outstanding_allocs {
-                self.metrics
-                    .memleaks
-                    .get_or_create(&AddrLabel { addr })
-                    .set(count as i64);
+                .set(self.memleak_state.num_successful_mallocs as i64);
+
+            for (pid, b_tree_map) in self.memleak_state.memory_map.iter() {
+                for (_, alloc) in b_tree_map {
+                    self.metrics
+                        .memleaks
+                        .get_or_create(&metrics::MemleakLabelSet {
+                            pid: pid.clone(),
+                            offset: alloc.offset,
+                        })
+                        .set(alloc.size as i64);
+                }
             }
+            //for (addr, count) in memleak_state.outstanding_allocs {
+            //    self.metrics
+            //        .memleaks
+            //        .get_or_create(&AddrLabel { addr })
+            //        .set(count as i64);
+            //}
         }
         // updates kernel launch stats
         if self.opts.cudatrace {
@@ -141,7 +154,7 @@ impl Gpuprobe {
 
     /// Displays metrics collected by the GPUprobe instance
     /// Note: this causes metrics to be recollected from the eBPF Maps, which
-    /// had non-zero interference with the eBPF uprobes.
+    /// has non-zero interference with the eBPF uprobes.
     pub fn display_metrics(&mut self) -> Result<(), GpuprobeError> {
         let now = Local::now();
         let formatted_datetime = now.format("%Y-%m-%d %H:%M:%S").to_string();
@@ -149,8 +162,9 @@ impl Gpuprobe {
         println!("{}\n", formatted_datetime);
 
         if self.opts.memleak {
-            let memleak_data = self.collect_data_memleak()?;
-            println!("{}", memleak_data);
+            self.memleak_state.cleanup_terminated_processes()?;
+            self.consume_memleak_events()?;
+            print!("{}", self.memleak_state);
         }
         if self.opts.cudatrace {
             let cudatrace_data = self.collect_data_cudatrace()?;

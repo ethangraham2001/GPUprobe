@@ -9,12 +9,18 @@ pub struct AddrLabel {
     pub addr: u64,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct MemleakLabelSet {
+    pub pid: u32,
+    pub offset: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct GpuprobeMetrics {
     opts: Opts,
     // memleak metrics
     pub num_mallocs: Gauge,
-    pub memleaks: Family<AddrLabel, Gauge>,
+    pub memleaks: Family<MemleakLabelSet, Gauge>,
     // cuda trace
     pub kernel_launches: Family<AddrLabel, Gauge>,
 }
