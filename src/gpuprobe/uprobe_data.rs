@@ -1,13 +1,5 @@
 use super::gpuprobe_bandwidth_util::CudaMemcpy;
 
-/// defines the data that is collected in a cycle of the memleak program
-pub struct MemleakData {
-    /// a Vec of `(addr, count)` where:
-    ///     - `addr` is the virtual address (on-device) of the allocation
-    ///     - `count` is the number of bytes associated to that allocation
-    pub outstanding_allocs: Vec<(u64, u64)>,
-}
-
 /// defines the data that is collected in a cycle of the cudatrace program
 pub struct CudaTraceData {
     /// a Vec of `(addr, count)` where:
@@ -20,26 +12,6 @@ pub struct CudaTraceData {
 pub struct BandwidthUtilData {
     /// a Vec of `CudaMemcpy` calls
     pub cuda_memcpys: Vec<CudaMemcpy>,
-}
-
-impl std::fmt::Display for MemleakData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let leaked_bytes = self
-            .outstanding_allocs
-            .iter()
-            .fold(0u64, |total, (_, size)| total + size);
-
-        writeln!(
-            f,
-            "{} bytes leaked from {} cuda memory allocation(s)",
-            leaked_bytes,
-            self.outstanding_allocs.len()
-        )?;
-
-        Ok(for (addr, size) in self.outstanding_allocs.iter() {
-            writeln!(f, "\t0x{addr:x}: {size} bytes")?;
-        })
-    }
 }
 
 impl std::fmt::Display for CudaTraceData {

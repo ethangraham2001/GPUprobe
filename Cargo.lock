@@ -406,6 +406,7 @@ dependencies = [
  "libbpf-cargo",
  "libbpf-rs",
  "libc",
+ "nix",
  "prometheus-client",
  "tokio",
 ]

@@ -72,12 +72,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stdout_handle = tokio::spawn(async move {
         loop {
             let mut probe = gpuprobe_clone.lock().await;
-            probe.display_metrics().unwrap();
+            match probe.display_metrics() {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("ERROR: {:?}", e);
+                }
+            }
             tokio::time::sleep(Duration::from_secs(args.display_interval)).await;
         }
     });
 
-    let listener = tokio::net::TcpListener::bind(&args.metrics_addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(&args.metrics_addr)
+        .await
+        .unwrap();
     let server_handle = axum::serve(listener, app);
 
     select! {
@@ -94,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Handler for the endpoint that is scraped by Prometheus
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
-    state.gpuprobe.lock().await.export_open_metrics().unwrap();
+    let _ = state.gpuprobe.lock().await.export_open_metrics();
     let mut buffer = String::new();
     match encode(&mut buffer, &state.registry) {
         Ok(()) => (StatusCode::OK, buffer),
