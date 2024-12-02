@@ -1,5 +1,14 @@
 # GPUprobe
 
+## IMPORTANT
+
+GPUprobe has moved to an organization repository. This one is no longer
+maintained.
+
+[link to the new repo](https://github.com/GPUprobe/gpuprobe-daemon)
+
+## Introduction
+
 GPUprobe *(GPU probe, GP-uprobe)* provides utilities for observability
 of GPU behavior via their interaction with the Cuda runtime API by leveraging 
 eBPF uprobes.
